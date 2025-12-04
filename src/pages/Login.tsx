@@ -5,14 +5,14 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { useApp } from '@/context/AppContext';
+import { useAuth } from '@/context/AuthContext';
 import { UtensilsCrossed, Mail, Lock, ArrowRight } from 'lucide-react';
 
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const { login } = useApp();
+  const { signIn } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -20,40 +20,26 @@ export default function Login() {
     e.preventDefault();
     setIsLoading(true);
 
-    // Simulate API call
-    setTimeout(() => {
-      if (email && password) {
-        // Check for admin login
-        if (email === 'admin@school.com') {
-          login({
-            id: 'admin-1',
-            email,
-            name: 'Admin Sekolah',
-            role: 'admin',
-            createdAt: new Date(),
-          });
-          toast({
-            title: 'Login Berhasil',
-            description: 'Selamat datang, Admin!',
-          });
-          navigate('/admin');
-        } else {
-          login({
-            id: '1',
-            email,
-            name: 'Orang Tua Demo',
-            role: 'parent',
-            createdAt: new Date(),
-          });
-          toast({
-            title: 'Login Berhasil',
-            description: 'Selamat datang kembali!',
-          });
-          navigate('/dashboard');
-        }
-      }
+    const { error } = await signIn(email, password);
+
+    if (error) {
+      toast({
+        title: 'Login Gagal',
+        description: error.message === 'Invalid login credentials' 
+          ? 'Email atau password salah' 
+          : error.message,
+        variant: 'destructive',
+      });
       setIsLoading(false);
-    }, 1000);
+      return;
+    }
+
+    toast({
+      title: 'Login Berhasil',
+      description: 'Selamat datang kembali!',
+    });
+    navigate('/dashboard');
+    setIsLoading(false);
   };
 
   return (
@@ -78,7 +64,7 @@ export default function Login() {
           <form onSubmit={handleSubmit}>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="email">Email atau No. HP</Label>
+                <Label htmlFor="email">Email</Label>
                 <div className="relative">
                   <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
                   <Input
@@ -107,11 +93,6 @@ export default function Login() {
                   />
                 </div>
               </div>
-              <div className="flex items-center justify-end">
-                <Link to="/forgot-password" className="text-sm text-primary hover:underline">
-                  Lupa password?
-                </Link>
-              </div>
             </CardContent>
             <CardFooter className="flex flex-col gap-4">
               <Button type="submit" variant="hero" size="lg" className="w-full" disabled={isLoading}>
@@ -127,11 +108,6 @@ export default function Login() {
             </CardFooter>
           </form>
         </Card>
-
-        <p className="text-xs text-muted-foreground text-center mt-6">
-          Demo: gunakan email apapun untuk login sebagai orang tua,
-          <br />atau <span className="font-medium">admin@school.com</span> untuk login sebagai admin
-        </p>
       </div>
     </div>
   );

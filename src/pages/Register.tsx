@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { useApp } from '@/context/AppContext';
+import { useAuth } from '@/context/AuthContext';
 import { UtensilsCrossed, Mail, Lock, User, Phone, ArrowRight, Check } from 'lucide-react';
 
 export default function Register() {
@@ -17,7 +17,7 @@ export default function Register() {
     confirmPassword: '',
   });
   const [isLoading, setIsLoading] = useState(false);
-  const { login } = useApp();
+  const { signUp } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -37,25 +37,39 @@ export default function Register() {
       return;
     }
 
+    if (formData.password.length < 6) {
+      toast({
+        title: 'Error',
+        description: 'Password minimal 6 karakter',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setIsLoading(true);
 
-    // Simulate API call
-    setTimeout(() => {
-      login({
-        id: `user-${Date.now()}`,
-        email: formData.email,
-        name: formData.name,
-        phone: formData.phone,
-        role: 'parent',
-        createdAt: new Date(),
-      });
+    const { error } = await signUp(formData.email, formData.password, formData.name, formData.phone);
+
+    if (error) {
+      let errorMessage = error.message;
+      if (error.message.includes('already registered')) {
+        errorMessage = 'Email sudah terdaftar. Silakan login atau gunakan email lain.';
+      }
       toast({
-        title: 'Pendaftaran Berhasil',
-        description: 'Akun Anda telah dibuat. Selamat datang!',
+        title: 'Pendaftaran Gagal',
+        description: errorMessage,
+        variant: 'destructive',
       });
-      navigate('/dashboard');
       setIsLoading(false);
-    }, 1000);
+      return;
+    }
+
+    toast({
+      title: 'Pendaftaran Berhasil',
+      description: 'Silakan cek email Anda untuk verifikasi atau login langsung jika confirm email dimatikan.',
+    });
+    navigate('/login');
+    setIsLoading(false);
   };
 
   const benefits = [
@@ -165,12 +179,12 @@ export default function Register() {
                     id="password"
                     name="password"
                     type="password"
-                    placeholder="Minimal 8 karakter"
+                    placeholder="Minimal 6 karakter"
                     value={formData.password}
                     onChange={handleChange}
                     className="pl-10"
                     required
-                    minLength={8}
+                    minLength={6}
                   />
                 </div>
               </div>
