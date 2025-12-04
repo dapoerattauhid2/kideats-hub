@@ -13,6 +13,7 @@ export default function MenuPage() {
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [isUpdating, setIsUpdating] = useState<string | null>(null);
 
   const categories = [...new Set(menuItems.map(item => item.category))];
 
@@ -28,12 +29,38 @@ export default function MenuPage() {
     return cartItem?.quantity || 0;
   };
 
-  const handleAddToCart = (menuItem: typeof menuItems[0]) => {
-    addToCart(menuItem, 1);
-    toast({
-      title: 'Ditambahkan ke keranjang',
-      description: `${menuItem.name} berhasil ditambahkan`,
-    });
+  const handleAddToCart = async (menuItem: typeof menuItems[0]) => {
+    setIsUpdating(menuItem.id);
+    try {
+      await addToCart(menuItem, 1);
+      toast({
+        title: 'Ditambahkan ke keranjang',
+        description: `${menuItem.name} berhasil ditambahkan`,
+      });
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Gagal menambahkan ke keranjang',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsUpdating(null);
+    }
+  };
+
+  const handleQuantityChange = async (menuItemId: string, newQuantity: number) => {
+    setIsUpdating(menuItemId);
+    try {
+      await updateCartQuantity(menuItemId, newQuantity);
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Gagal mengubah jumlah',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsUpdating(null);
+    }
   };
 
   return (
@@ -113,15 +140,16 @@ export default function MenuPage() {
                       <Button
                         variant="outline"
                         size="icon-sm"
-                        onClick={() => updateCartQuantity(item.id, quantity - 1)}
+                        onClick={() => handleQuantityChange(item.id, quantity - 1)}
+                        disabled={isUpdating === item.id}
                       >
                         <Minus className="w-4 h-4" />
                       </Button>
                       <span className="w-8 text-center font-semibold">{quantity}</span>
                       <Button
                         size="icon-sm"
-                        onClick={() => updateCartQuantity(item.id, quantity + 1)}
-                        disabled={!item.isAvailable}
+                        onClick={() => handleQuantityChange(item.id, quantity + 1)}
+                        disabled={!item.isAvailable || isUpdating === item.id}
                       >
                         <Plus className="w-4 h-4" />
                       </Button>
@@ -130,7 +158,7 @@ export default function MenuPage() {
                     <Button
                       size="sm"
                       onClick={() => handleAddToCart(item)}
-                      disabled={!item.isAvailable}
+                      disabled={!item.isAvailable || isUpdating === item.id}
                     >
                       <ShoppingCart className="w-4 h-4 mr-1" />
                       Tambah

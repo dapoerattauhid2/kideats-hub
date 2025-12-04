@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useApp } from '@/context/AppContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -7,6 +8,29 @@ import { ShoppingCart, Plus, Minus, Trash2, ArrowRight, ChefHat } from 'lucide-r
 export default function CartPage() {
   const { cart, updateCartQuantity, removeFromCart, getCartTotal } = useApp();
   const navigate = useNavigate();
+  const [isUpdating, setIsUpdating] = useState(false);
+
+  const handleQuantityChange = async (menuItemId: string, newQuantity: number) => {
+    setIsUpdating(true);
+    try {
+      await updateCartQuantity(menuItemId, newQuantity);
+    } catch (error) {
+      console.error('Failed to update quantity:', error);
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const handleRemove = async (menuItemId: string) => {
+    setIsUpdating(true);
+    try {
+      await removeFromCart(menuItemId);
+    } catch (error) {
+      console.error('Failed to remove from cart:', error);
+    } finally {
+      setIsUpdating(false);
+    }
+  };
 
   if (cart.length === 0) {
     return (
@@ -62,7 +86,8 @@ export default function CartPage() {
                         variant="ghost"
                         size="icon-sm"
                         className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                        onClick={() => removeFromCart(item.menuItem.id)}
+                        onClick={() => handleRemove(item.menuItem.id)}
+                        disabled={isUpdating}
                       >
                         <Trash2 className="w-4 h-4" />
                       </Button>
@@ -72,14 +97,16 @@ export default function CartPage() {
                         <Button
                           variant="outline"
                           size="icon-sm"
-                          onClick={() => updateCartQuantity(item.menuItem.id, item.quantity - 1)}
+                          onClick={() => handleQuantityChange(item.menuItem.id, item.quantity - 1)}
+                          disabled={isUpdating}
                         >
                           <Minus className="w-4 h-4" />
                         </Button>
                         <span className="w-10 text-center font-semibold">{item.quantity}</span>
                         <Button
                           size="icon-sm"
-                          onClick={() => updateCartQuantity(item.menuItem.id, item.quantity + 1)}
+                          onClick={() => handleQuantityChange(item.menuItem.id, item.quantity + 1)}
+                          disabled={isUpdating}
                         >
                           <Plus className="w-4 h-4" />
                         </Button>

@@ -28,12 +28,12 @@ import { ChefHat, Plus, Edit, Trash2, Search, ImagePlus } from 'lucide-react';
 import { MenuItem } from '@/types';
 
 export default function AdminMenuPage() {
-  const { menuItems } = useApp();
+  const { menuItems, addMenuItem, updateMenuItem, deleteMenuItem } = useApp();
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState('');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
-  const [localMenuItems, setLocalMenuItems] = useState(menuItems);
+  const [isLoading, setIsLoading] = useState(false);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -44,14 +44,14 @@ export default function AdminMenuPage() {
     isAvailable: true,
   });
 
-  const categories = [...new Set(localMenuItems.map(item => item.category))];
+  const categories = [...new Set(menuItems.map(item => item.category))];
 
-  const filteredItems = localMenuItems.filter(item =>
+  const filteredItems = menuItems.filter(item =>
     item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     item.category.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const handleAdd = () => {
+  const handleAdd = async () => {
     if (!formData.name || !formData.price || !formData.category) {
       toast({
         title: 'Error',
@@ -61,62 +61,103 @@ export default function AdminMenuPage() {
       return;
     }
     
-    const newItem: MenuItem = {
-      id: `menu-${Date.now()}`,
-      name: formData.name,
-      description: formData.description,
-      price: parseInt(formData.price),
-      category: formData.category,
-      image: formData.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400',
-      isAvailable: formData.isAvailable,
-    };
-    
-    setLocalMenuItems(prev => [...prev, newItem]);
-    toast({
-      title: 'Menu Ditambahkan',
-      description: `${formData.name} berhasil ditambahkan ke daftar menu`,
-    });
-    resetForm();
-    setIsAddDialogOpen(false);
+    setIsLoading(true);
+    try {
+      await addMenuItem({
+        name: formData.name,
+        description: formData.description,
+        price: parseInt(formData.price),
+        category: formData.category,
+        image: formData.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400',
+        isAvailable: formData.isAvailable,
+      });
+      
+      toast({
+        title: 'Menu Ditambahkan',
+        description: `${formData.name} berhasil ditambahkan ke daftar menu`,
+      });
+      resetForm();
+      setIsAddDialogOpen(false);
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Gagal menambahkan menu',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleUpdate = () => {
+  const handleUpdate = async () => {
     if (!editingItem) return;
     
-    setLocalMenuItems(prev => prev.map(item =>
-      item.id === editingItem.id
-        ? {
-            ...item,
-            name: formData.name,
-            description: formData.description,
-            price: parseInt(formData.price),
-            category: formData.category,
-            image: formData.image,
-            isAvailable: formData.isAvailable,
-          }
-        : item
-    ));
-    
-    toast({
-      title: 'Menu Diperbarui',
-      description: `${formData.name} berhasil diperbarui`,
-    });
-    resetForm();
-    setEditingItem(null);
+    setIsLoading(true);
+    try {
+      await updateMenuItem(editingItem.id, {
+        name: formData.name,
+        description: formData.description,
+        price: parseInt(formData.price),
+        category: formData.category,
+        image: formData.image,
+        isAvailable: formData.isAvailable,
+      });
+      
+      toast({
+        title: 'Menu Diperbarui',
+        description: `${formData.name} berhasil diperbarui`,
+      });
+      resetForm();
+      setEditingItem(null);
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Gagal memperbarui menu',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleDelete = (id: string, name: string) => {
-    setLocalMenuItems(prev => prev.filter(item => item.id !== id));
-    toast({
-      title: 'Menu Dihapus',
-      description: `${name} berhasil dihapus dari daftar menu`,
-    });
+  const handleDelete = async (id: string, name: string) => {
+    setIsLoading(true);
+    try {
+      await deleteMenuItem(id);
+      toast({
+        title: 'Menu Dihapus',
+        description: `${name} berhasil dihapus dari daftar menu`,
+      });
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Gagal menghapus menu',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleToggleAvailability = (id: string) => {
-    setLocalMenuItems(prev => prev.map(item =>
-      item.id === id ? { ...item, isAvailable: !item.isAvailable } : item
-    ));
+  const handleToggleAvailability = async (item: MenuItem) => {
+    setIsLoading(true);
+    try {
+      await updateMenuItem(item.id, {
+        isAvailable: !item.isAvailable,
+      });
+      toast({
+        title: 'Status Diperbarui',
+        description: `Status ketersediaan ${item.name} berhasil diperbarui`,
+      });
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Gagal memperbarui status',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const resetForm = () => {
@@ -235,10 +276,12 @@ export default function AdminMenuPage() {
               </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
+              <Button variant="outline" onClick={() => setIsAddDialogOpen(false)} disabled={isLoading}>
                 Batal
               </Button>
-              <Button onClick={handleAdd}>Tambah Menu</Button>
+              <Button onClick={handleAdd} disabled={isLoading}>
+                {isLoading ? 'Menyimpan...' : 'Tambah Menu'}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -285,7 +328,8 @@ export default function AdminMenuPage() {
                 </span>
                 <Switch
                   checked={item.isAvailable}
-                  onCheckedChange={() => handleToggleAvailability(item.id)}
+                  onCheckedChange={() => handleToggleAvailability(item)}
+                  disabled={isLoading}
                 />
               </div>
               <div className="flex gap-2">
@@ -293,7 +337,13 @@ export default function AdminMenuPage() {
                   if (!open) setEditingItem(null);
                 }}>
                   <DialogTrigger asChild>
-                    <Button variant="outline" size="sm" className="flex-1" onClick={() => openEditDialog(item)}>
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className="flex-1" 
+                      onClick={() => openEditDialog(item)}
+                      disabled={isLoading}
+                    >
                       <Edit className="w-4 h-4 mr-1" />
                       Edit
                     </Button>
@@ -359,10 +409,16 @@ export default function AdminMenuPage() {
                       </div>
                     </div>
                     <DialogFooter>
-                      <Button variant="outline" onClick={() => setEditingItem(null)}>
+                      <Button 
+                        variant="outline" 
+                        onClick={() => setEditingItem(null)}
+                        disabled={isLoading}
+                      >
                         Batal
                       </Button>
-                      <Button onClick={handleUpdate}>Simpan</Button>
+                      <Button onClick={handleUpdate} disabled={isLoading}>
+                        {isLoading ? 'Menyimpan...' : 'Simpan'}
+                      </Button>
                     </DialogFooter>
                   </DialogContent>
                 </Dialog>
@@ -371,6 +427,7 @@ export default function AdminMenuPage() {
                   size="sm"
                   className="text-destructive hover:text-destructive hover:bg-destructive/10"
                   onClick={() => handleDelete(item.id, item.name)}
+                  disabled={isLoading}
                 >
                   <Trash2 className="w-4 h-4" />
                 </Button>

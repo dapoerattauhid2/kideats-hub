@@ -59,16 +59,31 @@ export default function CheckoutPage() {
 
     setIsProcessing(true);
 
-    // Simulate payment processing
-    setTimeout(() => {
-      const order = createOrder(selectedRecipient, deliveryDate);
+    try {
+      const order = await createOrder(selectedRecipient, deliveryDate);
+      
+      if (order) {
+        toast({
+          title: 'Pesanan Dibuat',
+          description: `Order ${order.id} berhasil dibuat. Silakan lakukan pembayaran.`,
+        });
+        navigate('/dashboard/orders');
+      } else {
+        toast({
+          title: 'Error',
+          description: 'Gagal membuat pesanan',
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
       toast({
-        title: 'Pesanan Dibuat',
-        description: `Order ${order.id} berhasil dibuat. Silakan lakukan pembayaran.`,
+        title: 'Error',
+        description: 'Gagal memproses pesanan',
+        variant: 'destructive',
       });
-      navigate('/dashboard/orders');
+    } finally {
       setIsProcessing(false);
-    }, 1500);
+    }
   };
 
   if (cart.length === 0) {
