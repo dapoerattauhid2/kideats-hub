@@ -252,46 +252,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // Load user's cart items
+  // Load user's cart items from localStorage (cart_items table not yet created)
   const loadUserCart = async (userId: string) => {
     try {
-      const { data, error } = await supabase
-        .from('cart_items')
-        .select(`
-          id,
-          quantity,
-          menu_item_id,
-          menu_items (
-            id,
-            name,
-            description,
-            price,
-            image_url,
-            category,
-            is_available
-          )
-        `)
-        .eq('user_id', userId);
-      
-      if (error) throw error;
-      
-      if (data) {
-        const cartItems: CartItem[] = data.map((item: any) => ({
-          menuItem: {
-            id: item.menu_items.id,
-            name: item.menu_items.name,
-            description: item.menu_items.description || '',
-            price: Number(item.menu_items.price),
-            image: item.menu_items.image_url || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400',
-            category: item.menu_items.category,
-            isAvailable: item.menu_items.is_available,
-          },
-          quantity: item.quantity,
-        }));
-        setCart(cartItems);
+      const savedCart = localStorage.getItem(`cart_${userId}`);
+      if (savedCart) {
+        setCart(JSON.parse(savedCart));
       }
     } catch (error) {
       console.error('Failed to load user cart:', error);
+    }
+  };
+
+  // Save cart to localStorage
+  const saveCartToStorage = (userId: string, cartData: CartItem[]) => {
+    try {
+      localStorage.setItem(`cart_${userId}`, JSON.stringify(cartData));
+    } catch (error) {
+      console.error('Failed to save cart:', error);
     }
   };
 
@@ -456,107 +434,61 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const addToCart = useCallback(async (menuItem: MenuItem, quantity = 1) => {
     if (!user) throw new Error('User not authenticated');
     
-    try {
-      // Check if item already in cart
-      const existing = cart.find(item => item.menuItem.id === menuItem.id);
+    setCart(prev => {
+      const existing = prev.find(item => item.menuItem.id === menuItem.id);
+      let newCart: CartItem[];
       
       if (existing) {
-        // Update quantity
-        const { error } = await supabase
-          .from('cart_items')
-          .update({ quantity: existing.quantity + quantity })
-          .eq('user_id', user.id)
-          .eq('menu_item_id', menuItem.id);
-        
-        if (error) throw error;
+        newCart = prev.map(item =>
+          item.menuItem.id === menuItem.id
+            ? { ...item, quantity: item.quantity + quantity }
+            : item
+        );
       } else {
-        // Insert new cart item
-        const { error } = await supabase
-          .from('cart_items')
-          .insert({
-            user_id: user.id,
-            menu_item_id: menuItem.id,
-            quantity,
-          });
-        
-        if (error) throw error;
+        newCart = [...prev, { menuItem, quantity }];
       }
       
-      // Reload cart
-      await loadUserCart(user.id);
-    } catch (error) {
-      console.error('Failed to add to cart:', error);
-      throw error;
-    }
-  }, [user, cart]);
+      saveCartToStorage(user.id, newCart);
+      return newCart;
+    });
+  }, [user]);
 
   const updateCartQuantity = useCallback(async (menuItemId: string, quantity: number) => {
     if (!user) throw new Error('User not authenticated');
     
-    try {
+    setCart(prev => {
+      let newCart: CartItem[];
+      
       if (quantity <= 0) {
-        // Delete item
-        const { error } = await supabase
-          .from('cart_items')
-          .delete()
-          .eq('user_id', user.id)
-          .eq('menu_item_id', menuItemId);
-        
-        if (error) throw error;
+        newCart = prev.filter(item => item.menuItem.id !== menuItemId);
       } else {
-        // Update quantity
-        const { error } = await supabase
-          .from('cart_items')
-          .update({ quantity })
-          .eq('user_id', user.id)
-          .eq('menu_item_id', menuItemId);
-        
-        if (error) throw error;
+        newCart = prev.map(item =>
+          item.menuItem.id === menuItemId
+            ? { ...item, quantity }
+            : item
+        );
       }
       
-      // Reload cart
-      await loadUserCart(user.id);
-    } catch (error) {
-      console.error('Failed to update cart quantity:', error);
-      throw error;
-    }
+      saveCartToStorage(user.id, newCart);
+      return newCart;
+    });
   }, [user]);
 
   const removeFromCart = useCallback(async (menuItemId: string) => {
     if (!user) throw new Error('User not authenticated');
     
-    try {
-      const { error } = await supabase
-        .from('cart_items')
-        .delete()
-        .eq('user_id', user.id)
-        .eq('menu_item_id', menuItemId);
-      
-      if (error) throw error;
-      
-      await loadUserCart(user.id);
-    } catch (error) {
-      console.error('Failed to remove from cart:', error);
-      throw error;
-    }
+    setCart(prev => {
+      const newCart = prev.filter(item => item.menuItem.id !== menuItemId);
+      saveCartToStorage(user.id, newCart);
+      return newCart;
+    });
   }, [user]);
 
   const clearCart = useCallback(async () => {
     if (!user) throw new Error('User not authenticated');
     
-    try {
-      const { error } = await supabase
-        .from('cart_items')
-        .delete()
-        .eq('user_id', user.id);
-      
-      if (error) throw error;
-      
-      setCart([]);
-    } catch (error) {
-      console.error('Failed to clear cart:', error);
-      throw error;
-    }
+    setCart([]);
+    localStorage.removeItem(`cart_${user.id}`);
   }, [user]);
 
   const getCartTotal = useCallback(() => {
