@@ -1,5 +1,5 @@
-import { Link, useNavigate, useLocation, Outlet } from 'react-router-dom';
-import { useApp } from '@/context/AppContext';
+import { Link, useNavigate, useLocation, Outlet, Navigate } from 'react-router-dom';
+import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import {
   UtensilsCrossed,
@@ -12,6 +12,7 @@ import {
   LogOut,
   Menu,
   X,
+  Loader2,
 } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
@@ -26,15 +27,32 @@ const adminNavItems = [
 ];
 
 export default function AdminLayout() {
-  const { user, logout } = useApp();
+  const { user, profile, isLoading, signOut } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await signOut();
     navigate('/login');
   };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  // Check if user is admin
+  if (profile?.role !== 'admin') {
+    return <Navigate to="/dashboard" replace />;
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -90,10 +108,12 @@ export default function AdminLayout() {
           <div className="p-4 border-b border-border">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-secondary/20 flex items-center justify-center">
-                <span className="text-secondary font-bold">A</span>
+                <span className="text-secondary font-bold">
+                  {(profile?.full_name || 'A').charAt(0).toUpperCase()}
+                </span>
               </div>
               <div className="flex-1 min-w-0">
-                <p className="font-semibold text-foreground truncate">{user?.name}</p>
+                <p className="font-semibold text-foreground truncate">{profile?.full_name || 'Admin'}</p>
                 <p className="text-sm text-muted-foreground truncate">Administrator</p>
               </div>
             </div>
