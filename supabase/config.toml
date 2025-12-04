@@ -1,1 +1,10 @@
 project_id = "cdotfnjrhutepntflkgq"
+
+[functions.create-payment]
+verify_jwt = true
+
+[functions.midtrans-webhook]
+verify_jwt = false
+
+[functions.get-midtrans-config]
+verify_jwt = false

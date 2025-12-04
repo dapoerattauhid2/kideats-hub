@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { useApp } from '@/context/AppContext';
+import { useAuth } from '@/context/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { useNavigate, Link } from 'react-router-dom';
+import { useMidtrans } from '@/hooks/useMidtrans';
+import { supabase } from '@/integrations/supabase/client';
 import {
   Select,
   SelectContent,
@@ -16,13 +18,15 @@ import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { format, addDays, isBefore, startOfDay, setHours, setMinutes } from 'date-fns';
 import { id } from 'date-fns/locale';
-import { CalendarIcon, Users, ShoppingCart, AlertCircle, CreditCard, Clock, ArrowLeft } from 'lucide-react';
+import { CalendarIcon, Users, ShoppingCart, AlertCircle, CreditCard, Clock, ArrowLeft, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export default function CheckoutPage() {
-  const { cart, recipients, getCartTotal, createOrder } = useApp();
+  const { cart, recipients, getCartTotal, createOrder, loadOrders } = useApp();
+  const { user } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
+  const { isReady: isMidtransReady, pay } = useMidtrans();
 
   const [selectedRecipient, setSelectedRecipient] = useState<string>('');
   const [deliveryDate, setDeliveryDate] = useState<Date | undefined>();
@@ -57,28 +61,91 @@ export default function CheckoutPage() {
       return;
     }
 
+    if (!user) {
+      toast({
+        title: 'Error',
+        description: 'Anda harus login terlebih dahulu',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setIsProcessing(true);
 
     try {
+      // Step 1: Create order in database
       const order = await createOrder(selectedRecipient, deliveryDate);
       
-      if (order) {
-        toast({
-          title: 'Pesanan Dibuat',
-          description: `Order ${order.id} berhasil dibuat. Silakan lakukan pembayaran.`,
-        });
-        navigate('/dashboard/orders');
-      } else {
-        toast({
-          title: 'Error',
-          description: 'Gagal membuat pesanan',
-          variant: 'destructive',
-        });
+      if (!order) {
+        throw new Error('Gagal membuat pesanan');
       }
+
+      // Step 2: Create Midtrans transaction
+      const { data: paymentData, error: paymentError } = await supabase.functions.invoke('create-payment', {
+        body: {
+          order_id: order.id,
+          gross_amount: order.totalPrice,
+          customer_name: user.user_metadata?.full_name || user.email || 'Customer',
+          customer_email: user.email || '',
+          items: order.items.map(item => ({
+            id: item.menuItemId,
+            name: item.menuItemName,
+            price: item.price,
+            quantity: item.quantity,
+          })),
+        },
+      });
+
+      if (paymentError) {
+        console.error('Payment creation error:', paymentError);
+        throw new Error('Gagal membuat transaksi pembayaran');
+      }
+
+      if (!paymentData?.token) {
+        throw new Error('Token pembayaran tidak ditemukan');
+      }
+
+      // Step 3: Open Midtrans Snap popup
+      pay(paymentData.token, {
+        onSuccess: async (result) => {
+          console.log('Payment success:', result);
+          toast({
+            title: 'Pembayaran Berhasil',
+            description: 'Pesanan Anda telah dibayar',
+          });
+          await loadOrders();
+          navigate('/dashboard/orders');
+        },
+        onPending: async (result) => {
+          console.log('Payment pending:', result);
+          toast({
+            title: 'Menunggu Pembayaran',
+            description: 'Silakan selesaikan pembayaran Anda',
+          });
+          await loadOrders();
+          navigate('/dashboard/orders');
+        },
+        onError: (result) => {
+          console.error('Payment error:', result);
+          toast({
+            title: 'Pembayaran Gagal',
+            description: 'Terjadi kesalahan saat memproses pembayaran',
+            variant: 'destructive',
+          });
+        },
+        onClose: () => {
+          toast({
+            title: 'Pembayaran Dibatalkan',
+            description: 'Anda dapat melanjutkan pembayaran di halaman pesanan',
+          });
+          navigate('/dashboard/orders');
+        },
+      });
     } catch (error) {
+      console.error('Checkout error:', error);
       toast({
         title: 'Error',
-        description: 'Gagal memproses pesanan',
+        description: error instanceof Error ? error.message : 'Gagal memproses pesanan',
         variant: 'destructive',
       });
     } finally {
@@ -257,12 +324,17 @@ export default function CheckoutPage() {
                 size="lg"
                 className="w-full"
                 onClick={handleCheckout}
-                disabled={!selectedRecipient || !deliveryDate || isProcessing}
+                disabled={!selectedRecipient || !deliveryDate || isProcessing || !isMidtransReady}
               >
                 {isProcessing ? (
                   <>
-                    <Clock className="w-5 h-5 mr-2 animate-spin" />
+                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
                     Memproses...
+                  </>
+                ) : !isMidtransReady ? (
+                  <>
+                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                    Memuat Pembayaran...
                   </>
                 ) : (
                   <>

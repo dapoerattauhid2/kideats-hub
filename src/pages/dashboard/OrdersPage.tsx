@@ -1,11 +1,14 @@
 import { useState } from 'react';
 import { useApp } from '@/context/AppContext';
+import { useAuth } from '@/context/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
 import { Link, useNavigate } from 'react-router-dom';
+import { useMidtrans } from '@/hooks/useMidtrans';
+import { supabase } from '@/integrations/supabase/client';
 import {
   Select,
   SelectContent,
@@ -24,15 +27,21 @@ import {
   Filter,
   ShoppingCart,
   RefreshCw,
+  Loader2,
 } from 'lucide-react';
 import { Order, OrderStatus } from '@/types';
 
 export default function OrdersPage() {
-  const { orders, updateOrderStatus, cart, addToCart, menuItems } = useApp();
+  const { orders, updateOrderStatus, loadOrders, addToCart, menuItems } = useApp();
+  const { user } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
+  const { isReady: isMidtransReady, pay } = useMidtrans();
+  
   const [statusFilter, setStatusFilter] = useState<OrderStatus | 'all'>('all');
   const [selectedOrders, setSelectedOrders] = useState<string[]>([]);
+  const [payingOrderId, setPayingOrderId] = useState<string | null>(null);
+  const [isPayingMultiple, setIsPayingMultiple] = useState(false);
 
   const filteredOrders = statusFilter === 'all'
     ? orders
@@ -46,18 +55,90 @@ export default function OrdersPage() {
     );
   };
 
-  const handlePayOrder = (orderId: string) => {
-    // Simulate payment
-    setTimeout(() => {
-      updateOrderStatus(orderId, 'paid');
+  const handlePayOrder = async (order: Order) => {
+    if (!user) {
       toast({
-        title: 'Pembayaran Berhasil',
-        description: 'Status pesanan telah diubah menjadi Lunas',
+        title: 'Error',
+        description: 'Anda harus login terlebih dahulu',
+        variant: 'destructive',
       });
-    }, 1000);
+      return;
+    }
+
+    setPayingOrderId(order.id);
+
+    try {
+      // Create Midtrans transaction
+      const { data: paymentData, error: paymentError } = await supabase.functions.invoke('create-payment', {
+        body: {
+          order_id: order.id,
+          gross_amount: order.totalPrice,
+          customer_name: user.user_metadata?.full_name || user.email || 'Customer',
+          customer_email: user.email || '',
+          items: order.items.map(item => ({
+            id: item.menuItemId,
+            name: item.menuItemName,
+            price: item.price,
+            quantity: item.quantity,
+          })),
+        },
+      });
+
+      if (paymentError) {
+        console.error('Payment creation error:', paymentError);
+        throw new Error('Gagal membuat transaksi pembayaran');
+      }
+
+      if (!paymentData?.token) {
+        throw new Error('Token pembayaran tidak ditemukan');
+      }
+
+      // Open Midtrans Snap popup
+      pay(paymentData.token, {
+        onSuccess: async (result) => {
+          console.log('Payment success:', result);
+          toast({
+            title: 'Pembayaran Berhasil',
+            description: 'Pesanan Anda telah dibayar',
+          });
+          await loadOrders();
+        },
+        onPending: async (result) => {
+          console.log('Payment pending:', result);
+          toast({
+            title: 'Menunggu Pembayaran',
+            description: 'Silakan selesaikan pembayaran Anda',
+          });
+          await loadOrders();
+        },
+        onError: (result) => {
+          console.error('Payment error:', result);
+          toast({
+            title: 'Pembayaran Gagal',
+            description: 'Terjadi kesalahan saat memproses pembayaran',
+            variant: 'destructive',
+          });
+        },
+        onClose: () => {
+          toast({
+            title: 'Pembayaran Dibatalkan',
+            description: 'Anda dapat melanjutkan pembayaran kapan saja',
+          });
+        },
+      });
+    } catch (error) {
+      console.error('Payment error:', error);
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Gagal memproses pembayaran',
+        variant: 'destructive',
+      });
+    } finally {
+      setPayingOrderId(null);
+    }
   };
 
-  const handlePayMultiple = () => {
+  const handlePayMultiple = async () => {
     if (selectedOrders.length === 0) {
       toast({
         title: 'Pilih Order',
@@ -67,17 +148,98 @@ export default function OrdersPage() {
       return;
     }
 
-    // Simulate bulk payment
-    setTimeout(() => {
-      selectedOrders.forEach(orderId => {
-        updateOrderStatus(orderId, 'paid');
-      });
+    if (!user) {
       toast({
-        title: 'Pembayaran Berhasil',
-        description: `${selectedOrders.length} pesanan berhasil dibayar`,
+        title: 'Error',
+        description: 'Anda harus login terlebih dahulu',
+        variant: 'destructive',
       });
-      setSelectedOrders([]);
-    }, 1500);
+      return;
+    }
+
+    setIsPayingMultiple(true);
+
+    try {
+      // Calculate total and collect all items
+      const selectedOrderData = orders.filter(o => selectedOrders.includes(o.id));
+      const totalAmount = selectedOrderData.reduce((sum, o) => sum + o.totalPrice, 0);
+      const allItems = selectedOrderData.flatMap(o => o.items);
+      
+      // Create a batch order ID
+      const batchOrderId = `BATCH-${Date.now()}`;
+
+      // Create Midtrans transaction for batch payment
+      const { data: paymentData, error: paymentError } = await supabase.functions.invoke('create-payment', {
+        body: {
+          order_id: batchOrderId,
+          gross_amount: totalAmount,
+          customer_name: user.user_metadata?.full_name || user.email || 'Customer',
+          customer_email: user.email || '',
+          items: allItems.map(item => ({
+            id: item.menuItemId,
+            name: item.menuItemName,
+            price: item.price,
+            quantity: item.quantity,
+          })),
+        },
+      });
+
+      if (paymentError) {
+        console.error('Payment creation error:', paymentError);
+        throw new Error('Gagal membuat transaksi pembayaran');
+      }
+
+      if (!paymentData?.token) {
+        throw new Error('Token pembayaran tidak ditemukan');
+      }
+
+      // Open Midtrans Snap popup
+      pay(paymentData.token, {
+        onSuccess: async (result) => {
+          console.log('Batch payment success:', result);
+          // Update all selected orders to paid
+          for (const orderId of selectedOrders) {
+            await updateOrderStatus(orderId, 'paid');
+          }
+          toast({
+            title: 'Pembayaran Berhasil',
+            description: `${selectedOrders.length} pesanan berhasil dibayar`,
+          });
+          setSelectedOrders([]);
+          await loadOrders();
+        },
+        onPending: async (result) => {
+          console.log('Batch payment pending:', result);
+          toast({
+            title: 'Menunggu Pembayaran',
+            description: 'Silakan selesaikan pembayaran Anda',
+          });
+        },
+        onError: (result) => {
+          console.error('Batch payment error:', result);
+          toast({
+            title: 'Pembayaran Gagal',
+            description: 'Terjadi kesalahan saat memproses pembayaran',
+            variant: 'destructive',
+          });
+        },
+        onClose: () => {
+          toast({
+            title: 'Pembayaran Dibatalkan',
+            description: 'Anda dapat melanjutkan pembayaran kapan saja',
+          });
+        },
+      });
+    } catch (error) {
+      console.error('Batch payment error:', error);
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Gagal memproses pembayaran',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsPayingMultiple(false);
+    }
   };
 
   const handleReorder = (order: Order) => {
@@ -145,10 +307,19 @@ export default function OrdersPage() {
             <Button
               variant="warning"
               onClick={handlePayMultiple}
-              disabled={selectedOrders.length === 0}
+              disabled={selectedOrders.length === 0 || isPayingMultiple || !isMidtransReady}
             >
-              <CreditCard className="w-4 h-4 mr-2" />
-              Bayar {selectedOrders.length > 0 ? `(${selectedOrders.length})` : ''}
+              {isPayingMultiple ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Memproses...
+                </>
+              ) : (
+                <>
+                  <CreditCard className="w-4 h-4 mr-2" />
+                  Bayar {selectedOrders.length > 0 ? `(${selectedOrders.length})` : ''}
+                </>
+              )}
             </Button>
           </CardContent>
         </Card>
@@ -159,6 +330,8 @@ export default function OrdersPage() {
         <div className="space-y-4">
           {filteredOrders.map((order) => {
             const statusInfo = getStatusBadge(order.status);
+            const isPaying = payingOrderId === order.id;
+            
             return (
               <Card key={order.id} variant="interactive">
                 <CardContent className="p-4 lg:p-6">
@@ -174,7 +347,7 @@ export default function OrdersPage() {
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
                         <div className="flex items-center gap-2">
                           <span className="font-mono text-sm text-muted-foreground">
-                            {order.id}
+                            {order.id.substring(0, 8)}...
                           </span>
                           <Badge variant={statusInfo.variant}>
                             {statusInfo.label}
@@ -189,7 +362,9 @@ export default function OrdersPage() {
                         <div className="flex items-center gap-2 text-sm">
                           <User className="w-4 h-4 text-muted-foreground" />
                           <span>{order.recipientName}</span>
-                          <span className="text-muted-foreground">({order.recipientClass})</span>
+                          {order.recipientClass !== 'N/A' && (
+                            <span className="text-muted-foreground">({order.recipientClass})</span>
+                          )}
                         </div>
                         <div className="flex items-center gap-2 text-sm">
                           <Calendar className="w-4 h-4 text-muted-foreground" />
@@ -209,9 +384,22 @@ export default function OrdersPage() {
 
                       <div className="flex flex-wrap gap-2">
                         {order.status === 'pending' && (
-                          <Button size="sm" onClick={() => handlePayOrder(order.id)}>
-                            <CreditCard className="w-4 h-4 mr-1" />
-                            Bayar Sekarang
+                          <Button 
+                            size="sm" 
+                            onClick={() => handlePayOrder(order)}
+                            disabled={isPaying || !isMidtransReady}
+                          >
+                            {isPaying ? (
+                              <>
+                                <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                                Memproses...
+                              </>
+                            ) : (
+                              <>
+                                <CreditCard className="w-4 h-4 mr-1" />
+                                Bayar Sekarang
+                              </>
+                            )}
                           </Button>
                         )}
                         {(order.status === 'expired' || order.status === 'failed') && (
